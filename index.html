@@ -1,256 +1,213 @@
 <!DOCTYPE html>
-<html lang="pt-BR">
+<html lang="pt-br">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Reino das Tenebras Insetas</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Hollow Knight Dev</title>
     <style>
-        body {
-            margin: 0;
-            background: #000;
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            min-height: 100vh;
-        }
-        canvas {
-            border: 2px solid #2d3a5f;
-            background: #1a1a2e;
-        }
+        body { margin: 0; background: #050505; overflow: hidden; touch-action: none; font-family: sans-serif; }
+        canvas { display: block; background: #0a0a12; }
+        .ui { position: fixed; top: 20px; left: 20px; color: white; pointer-events: none; }
+        .controls { position: fixed; bottom: 20px; width: 100%; display: flex; justify-content: space-between; padding: 0 20px; box-sizing: border-box; }
+        .btn { width: 70px; height: 70px; background: rgba(255,255,255,0.1); border-radius: 50%; display: flex; align-items: center; justify-content: center; color: white; font-size: 24px; border: 2px solid rgba(255,255,255,0.2); user-select: none; -webkit-tap-highlight-color: transparent; pointer-events: auto; }
+        .btn:active { background: rgba(255,255,255,0.3); transform: scale(0.9); }
+        .btn-atk { border-color: #fff; background: rgba(255,255,255,0.05); }
     </style>
 </head>
 <body>
-    <canvas id="gameCanvas" width="800" height="450"></canvas>
 
-    <script>
-        const canvas = document.getElementById('gameCanvas');
-        const ctx = canvas.getContext('2d');
+    <div class="ui">
+        <div id="hp" style="font-size: 24px; letter-spacing: 5px;">❤️❤️❤️❤️❤️</div>
+        <div id="comboStatus" style="color: #00d2d3; font-size: 12px; margin-top: 5px; font-weight: bold;"></div>
+    </div>
 
-        // Protagonista
-        const player = {
-            x: 100,
-            y: 200,
-            width: 20,
-            height: 30,
-            speed: 3,
-            color: '#c2c8e4',
-            isDashing: false,
-            dashSpeed: 8,
-            dashTime: 0,
-            isAttacking: false,
-            attackTime: 0,
-            attackRange: 30,
-            attackColor: 'rgba(255, 200, 100, 0.8)',
-            attackDamage: 1 // Dano do ataque
-        };
+    <canvas id="gameCanvas"></canvas>
 
-        // Mobs (insetos inimigos)
-        let mobs = [
-            { x: 300, y: 390, width: 25, height: 25, color: '#d64545', speed: 1, isStunned: false, stunTime: 0, health: 2 },
-            { x: 600, y: 270, width: 25, height: 25, color: '#d64545', speed: 1.2, isStunned: false, stunTime: 0, health: 3 }
-        ];
+    <div class="controls">
+        <div style="display: flex; gap: 15px;">
+            <div class="btn" id="btnL">←</div>
+            <div class="btn" id="btnR">→</div>
+        </div>
+        <div style="display: flex; gap: 15px;">
+            <div class="btn btn-atk" id="btnAtk">)</div>
+            <div class="btn" id="btnDash">X</div>
+            <div class="btn" id="btnJump">↑</div>
+        </div>
+    </div>
 
-        // Ambiente (cidade esquecida)
-        const platforms = [
-            { x: 0, y: 420, width: 800, height: 30, color: '#2d3a5f' },
-            { x: 200, y: 350, width: 150, height: 20, color: '#2d3a5f' },
-            { x: 500, y: 300, width: 150, height: 20, color: '#2d3a5f' }
-        ];
+<script>
+const canvas = document.getElementById('gameCanvas');
+const ctx = canvas.getContext('2d');
+canvas.width = window.innerWidth;
+canvas.height = window.innerHeight;
 
-        // Partículas de poeira
-        const dustParticles = [];
-        for (let i = 0; i < 30; i++) {
-            dustParticles.push({
-                x: Math.random() * 800,
-                y: Math.random() * 450,
-                size: Math.random() * 2,
-                speed: Math.random() * 0.2
-            });
+const groundY = canvas.height - 100;
+
+// Configurações
+const config = {
+    gravity: 0.7, jump: -14, speed: 5, dashForce: 15,
+    comboCooldown: 2000, enemyStun: 2000
+};
+
+let player = {
+    x: 100, y: groundY - 50, w: 30, h: 45,
+    velX: 0, velY: 0, dir: 1, hp: 5,
+    isGrounded: false, isDashing: false,
+    atkActive: false, atkTimer: 0,
+    comboCount: 0, canAttack: true
+};
+
+// NPCs nascendo direto no chão
+let enemies = [
+    { x: 500, y: groundY - 40, w: 40, h: 40, hp: 3, velX: 2, isStunned: false, stunEnd: 0, alive: true },
+    { x: 800, y: groundY - 40, w: 40, h: 40, hp: 3, velX: -2, isStunned: false, stunEnd: 0, alive: true }
+];
+
+const touch = { l: false, r: false };
+
+function bind(id, on, off) {
+    const el = document.getElementById(id);
+    el.addEventListener('touchstart', (e) => { e.preventDefault(); on(); });
+    el.addEventListener('touchend', (e) => { e.preventDefault(); off(); });
+}
+
+bind('btnL', () => touch.l = true, () => touch.l = false);
+bind('btnR', () => touch.r = true, () => touch.r = false);
+bind('btnJump', () => { if(player.isGrounded) player.velY = config.jump; }, () => {});
+bind('btnDash', () => {
+    if(!player.isDashing) {
+        player.isDashing = true;
+        player.velX = player.dir * config.dashForce;
+        setTimeout(() => player.isDashing = false, 200);
+    }
+}, () => {});
+
+bind('btnAtk', () => {
+    if(player.canAttack && !player.atkActive) {
+        player.atkActive = true;
+        player.atkTimer = 10;
+        player.comboCount++;
+        
+        checkHit();
+
+        // Se chegar a 4 hits, entra em cooldown de 2s
+        if(player.comboCount >= 4) {
+            player.canAttack = false;
+            player.comboCount = 0;
+            document.getElementById('comboStatus').innerText = "RECARREGANDO...";
+            setTimeout(() => { 
+                player.canAttack = true; 
+                document.getElementById('comboStatus').innerText = "";
+            }, config.comboCooldown);
         }
+        
+        setTimeout(() => { player.atkActive = false; }, 150);
+    }
+}, () => {});
 
-        // Controles
-        const keys = {
-            left: false,
-            right: false,
-            up: false,
-            dash: false,
-            attack: false
-        };
-
-        document.addEventListener('keydown', (e) => {
-            switch(e.key) {
-                case 'ArrowLeft': keys.left = true; break;
-                case 'ArrowRight': keys.right = true; break;
-                case 'ArrowUp': keys.up = true; break;
-                case 'Shift': keys.dash = true; break;
-                case ' ': keys.attack = true; break; // Barra de espaço para atacar
+function checkHit() {
+    enemies.forEach(en => {
+        if(!en.alive) return;
+        let hitRange = 60;
+        let hitX = player.dir === 1 ? player.x + player.w : player.x - hitRange;
+        
+        if (hitX < en.x + en.w && hitX + hitRange > en.x && player.y < en.y + en.h && player.y + player.h > en.y) {
+            en.hp--;
+            en.isStunned = true;
+            en.stunEnd = Date.now() + config.enemyStun;
+            
+            // Knockback no 4º hit
+            if(player.comboCount === 4) {
+                en.velX = player.dir * 15;
             }
-        });
 
-        document.addEventListener('keyup', (e) => {
-            switch(e.key) {
-                case 'ArrowLeft': keys.left = false; break;
-                case 'ArrowRight': keys.right = false; break;
-                case 'ArrowUp': keys.up = false; break;
-                case 'Shift': keys.dash = false; player.isDashing = false; break;
-                case ' ': keys.attack = false; break;
-            }
-        });
-
-        // Verifica colisão
-        function checkCollision(rect1, rect2) {
-            return rect1.x < rect2.x + rect2.width &&
-                   rect1.x + rect1.width > rect2.x &&
-                   rect1.y < rect2.y + rect2.height &&
-                   rect1.y + rect1.height > rect2.y;
+            // Inimigo morre de verdade
+            if(en.hp <= 0) en.alive = false;
         }
+    });
+}
 
-        // Atualização do jogo
-        function update() {
-            // Movimento do jogador
-            if (keys.dash) {
-                player.isDashing = true;
-                player.dashTime = 10;
+function update() {
+    if (!player.isDashing) {
+        if (touch.l) { player.velX = -config.speed; player.dir = -1; }
+        else if (touch.right || touch.r) { player.velX = config.speed; player.dir = 1; }
+        else { player.velX *= 0.8; }
+    }
+    player.velY += config.gravity;
+    player.x += player.velX; player.y += player.velY;
+
+    if (player.y + player.h > groundY) {
+        player.y = groundY - player.h;
+        player.velY = 0; player.isGrounded = true;
+    }
+
+    enemies.forEach(en => {
+        if(!en.alive) return;
+
+        if (en.isStunned) {
+            en.x += en.velX; // Move apenas pelo impacto
+            en.velX *= 0.9;
+            if (Date.now() > en.stunEnd) en.isStunned = false;
+        } else {
+            en.x += en.velX;
+            if (en.x < 0 || en.x > canvas.width - en.w) en.velX *= -1;
+            
+            // Dano no player
+            if(Math.abs(player.x - en.x) < 25 && Math.abs(player.y - en.y) < 30) {
+                player.hp -= 0.01;
+                document.getElementById('hp').innerText = "❤️".repeat(Math.ceil(player.hp));
+                if(player.hp <= 0) location.reload();
             }
-
-            if (player.isDashing && player.dashTime > 0) {
-                player.x += keys.left ? -player.dashSpeed : keys.right ? player.dashSpeed : 0;
-                player.dashTime--;
-            } else if (!player.isAttacking) {
-                player.x += keys.left ? -player.speed : keys.right ? player.speed : 0;
-            }
-
-            // Ataque
-            if (keys.attack && !player.isAttacking) {
-                player.isAttacking = true;
-                player.attackTime = 5;
-
-                // Definir área de ataque
-                const attackHitbox = {
-                    x: keys.right ? player.x + player.width : player.x - player.attackRange,
-                    y: player.y,
-                    width: player.attackRange,
-                    height: player.height
-                };
-
-                // Aplica dano e stun nos mobs colididos
-                mobs = mobs.map(mob => {
-                    if (checkCollision(attackHitbox, mob)) {
-                        mob.health -= player.attackDamage;
-                        mob.isStunned = true;
-                        mob.stunTime = 30;
-                        mob.color = '#f1c40f'; // Cor amarela durante stun
-                    }
-                    return mob;
-                }).filter(mob => mob.health > 0); // Remove mobs com vida <= 0
-            }
-
-            if (player.isAttacking && player.attackTime > 0) {
-                player.attackTime--;
-            } else {
-                player.isAttacking = false;
-            }
-
-            // Limites da tela
-            if (player.x < 0) player.x = 0;
-            if (player.x + player.width > canvas.width) player.x = canvas.width - player.width;
-
-            // Atualiza mobs
-            mobs.forEach(mob => {
-                if (mob.isStunned) {
-                    mob.stunTime--;
-                    if (mob.stunTime <= 0) {
-                        mob.isStunned = false;
-                        mob.color = '#d64545'; // Cor original
-                    }
-                } else {
-                    // Movimento do mob em direção ao jogador
-                    if (mob.x < player.x) mob.x += mob.speed;
-                    else mob.x -= mob.speed;
-                }
-
-                // Colisão com plataformas (mantém mob na plataforma)
-                platforms.forEach(plat => {
-                    if (mob.y + mob.height < plat.y && mob.x + mob.width > plat.x && mob.x < plat.x + plat.width) {
-                        mob.y = plat.y - mob.height;
-                    }
-                });
-            });
-
-            // Atualiza poeira
-            dustParticles.forEach(p => {
-                p.y += p.speed;
-                if (p.y > canvas.height) p.y = 0;
-            });
         }
+        en.y += config.gravity;
+        if(en.y + en.h > groundY) { en.y = groundY - en.h; en.velY = 0; }
+    });
+}
 
-        // Desenho
-        function draw() {
-            ctx.clearRect(0, 0, canvas.width, canvas.height);
+function drawPlayer() {
+    ctx.save();
+    ctx.translate(player.x + player.w/2, player.y + player.h/2);
+    if(player.dir === -1) ctx.scale(-1, 1);
+    // Visual Hollow Knight
+    ctx.fillStyle = "#333"; // Capa
+    ctx.fillRect(-12, 0, 24, 20);
+    ctx.fillStyle = "white"; // Máscara
+    ctx.beginPath();
+    ctx.ellipse(0, -10, 15, 18, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = "black"; // Olhos
+    ctx.beginPath();
+    ctx.ellipse(-6, -10, 3, 5, 0.2, 0, Math.PI * 2);
+    ctx.ellipse(6, -10, 3, 5, -0.2, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+}
 
-            // Poeira
-            dustParticles.forEach(p => {
-                ctx.fillStyle = 'rgba(200, 200, 220, 0.5)';
-                ctx.beginPath();
-                ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
-                ctx.fill();
-            });
+function draw() {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.fillStyle = "#0f172a";
+    ctx.fillRect(0, groundY, canvas.width, 100);
+    
+    enemies.forEach(en => {
+        if(!en.alive) return;
+        ctx.fillStyle = en.isStunned ? "#f1c40f" : "#4a148c";
+        ctx.fillRect(en.x, en.y, en.w, en.h);
+    });
 
-            // Plataformas
-            platforms.forEach(plat => {
-                ctx.fillStyle = plat.color;
-                ctx.fillRect(plat.x, plat.y, plat.width, plat.height);
-                // Detalhes das ruínas
-                ctx.fillStyle = '#1e2749';
-                ctx.fillRect(plat.x + 10, plat.y - 5, plat.width - 20, 5);
-            });
+    drawPlayer();
 
-            // Ataque
-            if (player.isAttacking) {
-                ctx.fillStyle = player.attackColor;
-                if (keys.right) {
-                    ctx.fillRect(player.x + player.width, player.y, player.attackRange, player.height);
-                } else {
-                    ctx.fillRect(player.x - player.attackRange, player.y, player.attackRange, player.height);
-                }
-            }
+    if (player.atkActive) {
+        ctx.strokeStyle = "white";
+        ctx.lineWidth = 3;
+        ctx.beginPath();
+        let arcX = player.dir === 1 ? player.x + 40 : player.x - 10;
+        ctx.arc(arcX, player.y + 20, 30, -Math.PI/2, Math.PI/2, player.dir === -1);
+        ctx.stroke();
+    }
 
-            // Protagonista
-            ctx.fillStyle = player.color;
-            ctx.fillRect(player.x, player.y, player.width, player.height);
-            // "Armadura"
-            ctx.fillStyle = '#a8acc9';
-            ctx.fillRect(player.x + 5, player.y, 10, 5);
-            ctx.fillRect(player.x + 2, player.y + 25, 16, 5);
-
-            // Mobs e barra de vida
-            mobs.forEach(mob => {
-                // Desenha mob
-                ctx.fillStyle = mob.color;
-                ctx.fillRect(mob.x, mob.y, mob.width, mob.height);
-                // Olhos do mob
-                ctx.fillStyle = '#000';
-                ctx.beginPath();
-                ctx.arc(mob.x + 8, mob.y + 8, 3, 0, Math.PI * 2);
-                ctx.arc(mob.x + 17, mob.y + 8, 3, 0, Math.PI * 2);
-                ctx.fill();
-
-                // Barra de vida
-                ctx.fillStyle = '#34495e';
-                ctx.fillRect(mob.x - 2, mob.y - 8, mob.width + 4, 4);
-                ctx.fillStyle = '#2ecc71';
-                ctx.fillRect(mob.x - 2, mob.y - 8, (mob.width + 4) * (mob.health / 3), 4); // Vida máxima 3
-            });
-        }
-
-        // Loop do jogo
-        function gameLoop() {
-            update();
-            draw();
-            requestAnimationFrame(gameLoop);
-        }
-
-        gameLoop();
-    </script>
+    requestAnimationFrame(() => { update(); draw(); });
+}
+draw();
+</script>
 </body>
 </html>
