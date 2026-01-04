@@ -11,6 +11,7 @@
         .controls { position: fixed; bottom: 20px; width: 100%; display: flex; justify-content: space-between; padding: 0 20px; box-sizing: border-box; z-index: 10; }
         .btn { width: 70px; height: 70px; background: rgba(255,255,255,0.1); border-radius: 50%; display: flex; align-items: center; justify-content: center; color: white; font-size: 24px; border: 2px solid rgba(255,255,255,0.2); user-select: none; -webkit-tap-highlight-color: transparent; pointer-events: auto; }
         .btn:active { background: rgba(255,255,255,0.3); transform: scale(0.9); }
+        .btn-atk { border-color: #fff; background: rgba(255,255,255,0.05); }
     </style>
 </head>
 <body>
@@ -18,6 +19,7 @@
     <div class="ui">
         <div id="hp" style="font-size: 24px; letter-spacing: 5px;">❤❤❤❤❤</div>
         <div id="combo" style="color: cyan; font-size: 14px; margin-top: 5px;">Combo: 0/4</div>
+        <div id="roomInfo" style="color: white; font-size: 18px; margin-top: 5px; font-weight: bold;">SALA 1</div>
     </div>
 
     <canvas id="gameCanvas"></canvas>
@@ -28,7 +30,7 @@
             <div class="btn" id="btnR">→</div>
         </div>
         <div style="display: flex; gap: 15px;">
-            <div class="btn" id="btnAtk" style="border-color: #fff;">)</div>
+            <div class="btn btn-atk" id="btnAtk">)</div>
             <div class="btn" id="btnDash">X</div>
             <div class="btn" id="btnJump">↑</div>
         </div>
@@ -40,12 +42,12 @@ const ctx = canvas.getContext('2d');
 canvas.width = window.innerWidth;
 canvas.height = window.innerHeight;
 
-const worldWidth = 3000; // Tamanho do mapa
 const groundY = canvas.height - 100;
-
+const worldWidth = 3000;
 let cameraX = 0;
+let currentRoom = 1;
 
-const config = { gravity: 0.7, jump: -14, speed: 6, dashForce: 16, enemyStun: 2000 };
+const config = { gravity: 0.7, jump: -14, speed: 5, dashForce: 15, comboCooldown: 2000, enemyStun: 2000 };
 
 let player = {
     x: 100, y: groundY - 50, w: 30, h: 45,
@@ -55,15 +57,30 @@ let player = {
     comboCount: 0, canAttack: true
 };
 
-let enemies = [
-    { x: 600, y: groundY - 40, w: 40, h: 40, hp: 3, velX: 2, alive: true, isAtk: false, atkDir: 1 },
-    { x: 1200, y: groundY - 40, w: 40, h: 40, hp: 3, velX: -2, alive: true, isAtk: false, atkDir: -1 },
-    { x: 1800, y: groundY - 40, w: 40, h: 40, hp: 3, velX: 1.5, alive: true, isAtk: false, atkDir: 1 },
-    { x: 2500, y: groundY - 40, w: 40, h: 40, hp: 3, velX: -2.5, alive: true, isAtk: false, atkDir: -1 }
-];
+let enemies = [];
+
+function spawnEnemies() {
+    enemies = [];
+    document.getElementById('roomInfo').innerText = currentRoom === 10 ? "SALA 10 - BOSS" : "SALA " + currentRoom;
+    
+    if (currentRoom === 10) {
+        // Boss Final
+        enemies.push({ x: 1500, y: groundY - 100, w: 100, h: 100, hp: 30, maxHp: 30, velX: 3, isStunned: false, stunEnd: 0, alive: true, isAtk: false, atkDir: 1, isBoss: true });
+    } else {
+        // N inimigos por sala
+        for (let i = 0; i < currentRoom; i++) {
+            enemies.push({ 
+                x: 600 + (Math.random() * 1800), y: groundY - 40, w: 40, h: 40, 
+                hp: 3, maxHp: 3, velX: 2, isStunned: false, stunEnd: 0, alive: true, 
+                isAtk: false, atkDir: 1, isBoss: false 
+            });
+        }
+    }
+}
+
+spawnEnemies();
 
 const touch = { l: false, r: false };
-
 function bind(id, on, off) {
     const el = document.getElementById(id);
     el.addEventListener('touchstart', (e) => { e.preventDefault(); on(); });
@@ -90,7 +107,7 @@ bind('btnAtk', () => {
         if(player.comboCount >= 4) {
             player.canAttack = false;
             player.comboCount = 0;
-            setTimeout(() => { player.canAttack = true; }, 2000);
+            setTimeout(() => { player.canAttack = true; }, config.comboCooldown);
         }
         document.getElementById('combo').innerText = `Combo: ${player.comboCount}/4 ${!player.canAttack ? '(RECARREGANDO...)' : ''}`;
         setTimeout(() => { player.atkActive = false; }, 150);
@@ -100,20 +117,19 @@ bind('btnAtk', () => {
 function checkHit() {
     enemies.forEach(en => {
         if(!en.alive) return;
-        let hitRange = 70;
+        let hitRange = player.isBoss ? 120 : 65;
         let hitX = player.dir === 1 ? player.x + player.w : player.x - hitRange;
         if (hitX < en.x + en.w && hitX + hitRange > en.x && player.y < en.y + en.h && player.y + player.h > en.y) {
             en.hp--;
             en.isStunned = true;
-            en.stunEnd = Date.now() + 1500;
-            if(player.comboCount === 4) { en.velX = player.dir * 25; }
+            en.stunEnd = Date.now() + 500;
+            if(player.comboCount === 4) { en.velX = player.dir * 20; }
             if(en.hp <= 0) en.alive = false;
         }
     });
 }
 
 function update() {
-    // Movimento Player
     if (!player.isDashing) {
         if (touch.l) { player.velX = -config.speed; player.dir = -1; }
         else if (touch.r) { player.velX = config.speed; player.dir = 1; }
@@ -121,14 +137,17 @@ function update() {
     }
     player.velY += config.gravity;
     player.x += player.velX; player.y += player.velY;
-    
-    // Limites do Mundo
-    if(player.x < 0) player.x = 0;
-    if(player.x > worldWidth - player.w) player.x = worldWidth - player.w;
 
+    // Mudança de sala
+    if (player.x > worldWidth - 50) {
+        currentRoom++;
+        player.x = 100;
+        spawnEnemies();
+    }
+
+    if(player.x < 0) player.x = 0;
     if (player.y + player.h > groundY) { player.y = groundY - player.h; player.velY = 0; player.isGrounded = true; }
 
-    // Câmera segue o bicho
     cameraX = player.x - canvas.width / 2;
     if(cameraX < 0) cameraX = 0;
     if(cameraX > worldWidth - canvas.width) cameraX = worldWidth - canvas.width;
@@ -137,18 +156,14 @@ function update() {
         if(!en.alive) return;
         if (!en.isStunned) {
             let dist = player.x - en.x;
-            if (Math.abs(dist) < 400) {
-                en.atkDir = dist > 0 ? 1 : -1;
-                en.x += en.atkDir * 2.5; 
-            } else {
-                en.x += en.velX;
-                if (en.x < 0 || en.x > worldWidth - en.w) en.velX *= -1;
-            }
-            if (Math.abs(dist) < 60 && !en.isAtk) {
+            en.atkDir = dist > 0 ? 1 : -1;
+            en.x += en.atkDir * (en.isBoss ? 2 : 3);
+
+            if (Math.abs(dist) < (en.isBoss ? 100 : 70) && !en.isAtk) {
                 en.isAtk = true;
-                player.hp -= 0.5;
+                player.hp -= en.isBoss ? 3 : 0.5; // Boss tira 3 de dano
                 document.getElementById('hp').innerText = "❤".repeat(Math.max(0, Math.ceil(player.hp)));
-                setTimeout(() => en.isAtk = false, 1000);
+                setTimeout(() => en.isAtk = false, en.isBoss ? 1500 : 600);
                 if(player.hp <= 0) location.reload();
             }
         } else if (Date.now() > en.stunEnd) en.isStunned = false;
@@ -156,60 +171,41 @@ function update() {
 }
 
 function drawPlayer() {
-    ctx.save();
-    ctx.translate(player.x + player.w/2, player.y + player.h/2);
+    ctx.save(); ctx.translate(player.x + player.w/2, player.y + player.h/2);
     if(player.dir === -1) ctx.scale(-1, 1);
-    ctx.fillStyle = "#333";
-    ctx.beginPath(); ctx.moveTo(-15, 0); ctx.lineTo(15, 0); ctx.lineTo(10, 25); ctx.lineTo(-10, 25); ctx.fill();
-    ctx.fillStyle = "white";
-    ctx.beginPath(); ctx.ellipse(0, -10, 15, 18, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = "#333"; ctx.beginPath(); ctx.moveTo(-15, 0); ctx.lineTo(15, 0); ctx.lineTo(10, 25); ctx.lineTo(-10, 25); ctx.fill();
+    ctx.fillStyle = "white"; ctx.beginPath(); ctx.ellipse(0, -10, 15, 18, 0, 0, Math.PI * 2); ctx.fill();
     ctx.beginPath(); ctx.moveTo(-10, -22); ctx.lineTo(-12, -32); ctx.lineTo(-4, -25); ctx.moveTo(10, -22); ctx.lineTo(12, -32); ctx.lineTo(4, -25); ctx.fill();
-    ctx.fillStyle = "black";
-    ctx.beginPath(); ctx.ellipse(-6, -10, 3, 5, 0.2, 0, Math.PI * 2); ctx.ellipse(6, -10, 3, 5, -0.2, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = "black"; ctx.beginPath(); ctx.ellipse(-6, -10, 3, 5, 0.2, 0, Math.PI * 2); ctx.ellipse(6, -10, 3, 5, -0.2, 0, Math.PI * 2); ctx.fill();
     ctx.restore();
 }
 
 function draw() {
     ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.save(); ctx.translate(-cameraX, 0);
+    ctx.fillStyle = "#0a0a0a"; ctx.fillRect(0, groundY, worldWidth, 100);
     
-    ctx.save();
-    ctx.translate(-cameraX, 0); // O segredo da câmera
-
-    // Chão do Mapa (Longo)
-    ctx.fillStyle = "#0f172a";
-    ctx.fillRect(0, groundY, worldWidth, 100);
-    
-    // Detalhes no fundo para dar senso de movimento
-    ctx.fillStyle = "#1e293b";
-    for(let i=0; i<worldWidth; i+=400) ctx.fillRect(i, groundY-150, 50, 150);
-
     enemies.forEach(en => {
         if(!en.alive) return;
-        ctx.fillStyle = en.isStunned ? "#f1c40f" : "#4a148c";
+        ctx.fillStyle = en.isStunned ? "#f1c40f" : (en.isBoss ? "#e74c3c" : "#4a148c");
         ctx.fillRect(en.x, en.y, en.w, en.h);
         if(en.isAtk) {
-            ctx.strokeStyle = "red"; ctx.lineWidth = 3;
-            ctx.beginPath();
-            let startX = en.atkDir === 1 ? en.x + en.w : en.x;
-            ctx.moveTo(startX, en.y + 20); ctx.lineTo(startX + (en.atkDir * 20), en.y + 10);
-            ctx.moveTo(startX, en.y + 20); ctx.lineTo(startX + (en.atkDir * 20), en.y + 30);
+            ctx.strokeStyle = "red"; ctx.lineWidth = en.isBoss ? 8 : 3;
+            ctx.beginPath(); let startX = en.atkDir === 1 ? en.x + en.w : en.x;
+            ctx.moveTo(startX, en.y + en.h/2); ctx.lineTo(startX + (en.atkDir * (en.isBoss ? 50 : 25)), en.y + (en.isBoss ? 0 : 10));
+            ctx.moveTo(startX, en.y + en.h/2); ctx.lineTo(startX + (en.atkDir * (en.isBoss ? 50 : 25)), en.y + (en.isBoss ? en.h : 30));
             ctx.stroke();
         }
+        ctx.fillStyle = "red"; ctx.fillRect(en.x, en.y - 15, (en.hp/en.maxHp)*en.w, 6);
     });
 
     drawPlayer();
-
     if (player.atkActive) {
-        ctx.strokeStyle = "rgba(255,255,255," + (player.atkTimer/10) + ")";
-        ctx.lineWidth = 4;
-        ctx.beginPath();
+        ctx.strokeStyle = "white"; ctx.lineWidth = 4; ctx.beginPath();
         let arcX = player.dir === 1 ? player.x + 40 : player.x - 10;
-        ctx.arc(arcX, player.y + 20, 35, -Math.PI/2, Math.PI/2, player.dir === -1);
-        ctx.stroke();
-        player.atkTimer--;
+        ctx.arc(arcX, player.y + 20, 35, -Math.PI/2, Math.PI/2, player.dir === -1); ctx.stroke();
     }
-
-    ctx.restore(); // Restaura para a UI não se mexer junto
+    ctx.restore();
     requestAnimationFrame(() => { update(); draw(); });
 }
 draw();
